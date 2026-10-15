@@ -1,0 +1,106 @@
+# Dockerfile for Blender MCP Environment Pool
+# Includes Blender 4.0, Xvfb (virtual display), and Blender MCP addon
+#
+# Architecture:
+#   Xvfb (virtual display :99) -> Blender (normal mode, LIBGL_ALWAYS_SOFTWARE=1)
+#     -> addon.py (socket server on port 9876)
+#     -> MCP Gateway (SSE on port 8000)
+#     -> MCP Server (mcpuniverse.mcp.servers.blender) connects to addon via socket
+#
+# The Blender addon (from github.com/ahujasid/blender-mcp) provides a socket server
+# that the MCP server connects to. In Docker, we use Xvfb + Mesa software rendering
+# (LIBGL_ALWAYS_SOFTWARE=1) so Blender can run in normal mode without a GPU.
+
+FROM python:3.11-slim-bookworm
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    MCP_GATEWAY_PORT=8000 \
+    MCP_GATEWAY_MODE=sse \
+    MCP_SERVERS="" \
+    DISPLAY=:99 \
+    BLENDER_ADDON_PORT=9876 \
+    LIBGL_ALWAYS_SOFTWARE=1
+
+# Install system dependencies including Xvfb and OpenGL libs needed by Blender
+# libgl1-mesa-dri provides the software rasterizer (llvmpipe/softpipe) for GPU-less rendering
+# libglx-mesa0 provides GLX (OpenGL over X11) needed by Blender's window system
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    git \
+    build-essential \
+    wget \
+    xz-utils \
+    xvfb \
+    libgl1-mesa-glx \
+    libgl1-mesa-dri \
+    libglx-mesa0 \
+    libegl1-mesa \
+    libglib2.0-0 \
+    libxrender1 \
+    libxext6 \
+    libxi6 \
+    libxfixes3 \
+    libxkbcommon0 \
+    libxkbcommon-x11-0 \
+    libsm6 \
+    libice6 \
+    libxxf86vm1 \
+    libxrandr2 \
+    libxcursor1 \
+    libxinerama1 \
+    netcat-openbsd \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Blender 4.0 from official release
+RUN cd /tmp && \
+    wget -q "https://download.blender.org/release/Blender4.0/blender-4.0.0-linux-x64.tar.xz" && \
+    tar -xf "blender-4.0.0-linux-x64.tar.xz" && \
+    mv "blender-4.0.0-linux-x64" /opt/blender && \
+    ln -s /opt/blender/blender /usr/local/bin/blender && \
+    rm -f "blender-4.0.0-linux-x64.tar.xz"
+
+# Verify Blender is installed
+RUN blender --version
+
+# Set work directory
+WORKDIR /app
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+RUN pip install --upgrade pip && \
+    pip install -r requirements.txt
+
+# Copy source code
+COPY . .
+
+# Install MCPUniverse package
+RUN pip install -e .
+
+# Create workspace and blend output directories
+RUN mkdir -p /workspace /app/blend_files && chmod 777 /workspace /app/blend_files
+
+# Download Blender MCP addon
+# Try Google Drive first (compatible with our server.py), fallback to GitHub (newer API)
+RUN mkdir -p /app/blender_addon && \
+    pip install --no-cache-dir gdown && \
+    (gdown "https://drive.google.com/uc?id=1o3SCsPQUXKf7y3anuyvhwvN5Zd1xHcR0" \
+        -O /app/blender_addon/addon.py 2>&1 || \
+     curl -sL "https://raw.githubusercontent.com/ahujasid/blender-mcp/main/addon.py" \
+        -o /app/blender_addon/addon.py) && \
+    test -s /app/blender_addon/addon.py || { echo "ERROR: Failed to download addon.py from both sources"; exit 1; } && \
+    echo "Blender MCP addon downloaded successfully"
+
+# Copy startup scripts (separate files to avoid heredoc issues with legacy Docker builder)
+COPY tests/mcp/env_pool/blender_scripts/start_blender_addon.py /app/start_blender_addon.py
+COPY tests/mcp/env_pool/blender_scripts/start_blender_gateway.sh /app/start_blender_gateway.sh
+RUN chmod +x /app/start_blender_gateway.sh
+
+# Expose MCP Gateway port
+EXPOSE 8000
+
+# Default command
+CMD ["/app/start_blender_gateway.sh"]

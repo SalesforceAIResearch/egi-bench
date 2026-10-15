@@ -1,0 +1,31 @@
+FROM python:3.11-slim
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+
+# Set working directory
+WORKDIR /app
+
+# Install Python dependencies including aiohttp for HTTP server
+RUN pip install --upgrade pip --no-cache-dir \
+    aiohttp>=3.9.0 \
+    numpy \
+    pandas \
+    scipy \
+    scikit-learn \
+    sympy
+
+# Copy the sandbox container server script
+# Note: This assumes the mcpuniverse package structure is available
+# You may need to adjust the COPY path based on your build context
+COPY docker/python_code_sandbox/ /app/python_code_sandbox
+
+# Set PYTHONPATH so we can import mcpuniverse
+ENV PYTHONPATH=/app
+
+# Expose the HTTP server port
+EXPOSE 8080
+
+# Run the HTTP server that executes Python code
+CMD ["python", "-m", "python_code_sandbox.sandbox_container_server"]
+

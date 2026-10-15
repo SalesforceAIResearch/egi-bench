@@ -1,0 +1,10 @@
+# PersonaBench runtime evaluation outputs
+logs/
+
+# Local Python environment and caches
+.venv/
+__pycache__/
+*.py[cod]
+
+# Local packaging artifacts
+personabench.egg-info/

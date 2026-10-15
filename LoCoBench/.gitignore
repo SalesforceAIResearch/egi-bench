@@ -1,0 +1,17 @@
+# Runtime outputs
+evaluation_results/
+intermediate_results/
+logs/
+
+# Downloaded/generated benchmark data
+data/
+data.zip
+tmp*.yaml
+__MACOSX/
+api.sh
+
+# Local Python environment/build artifacts
+.venv/
+locobench.egg-info/
+__pycache__/
+*.py[cod]

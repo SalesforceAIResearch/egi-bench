@@ -1,0 +1,55 @@
+# Complete Benchmark Configuration with MCPPlus
+#
+# This configuration is identical to a standard MCP-Universe benchmark
+# except for the addition of the wrapper configuration block.
+#
+# The wrapper defaults to gpt-5-mini for post-processing, but this example
+# shows how to explicitly configure a custom LLM if desired.
+#
+# Everything else remains the same - no changes to agent instructions needed.
+
+---
+kind: llm
+spec:
+  name: llm-main
+  type: openai
+  config:
+    model_name: gpt-5
+
+---
+kind: llm
+spec:
+  name: llm-postprocess
+  type: openai
+  config:
+    model_name: gpt-5-mini             # Explicitly set cheaper LLM for post-processing
+
+---
+kind: wrapper
+spec:
+  enabled: true
+  token_threshold: 2000
+  post_process_llm:
+    llm: llm-postprocess     # Optional: defaults to gpt-5-mini if omitted
+  max_iterations: 3
+  llm_timeout: 500
+  skip_iteration_on_size_failure: false
+
+---
+kind: agent
+spec:
+  name: react-agent
+  type: react
+  config:
+    llm: llm-main
+    instruction: You are a helpful assistant.
+    servers:
+      - name: web-search
+
+---
+kind: benchmark
+spec:
+  description: Test agent with MCPPlus post-processing
+  agent: react-agent
+  tasks:
+    - dummy/tasks/weather_1.json

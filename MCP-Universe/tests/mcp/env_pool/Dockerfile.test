@@ -1,0 +1,45 @@
+# Test Dockerfile for MCP Environment Pool Integration Tests
+# This is a simplified version for testing purposes
+
+FROM python:3.11-slim
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    MCP_GATEWAY_PORT=8000 \
+    MCP_GATEWAY_MODE=sse \
+    MCP_SERVERS=""
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set work directory
+WORKDIR /app
+
+# Copy requirements and install Python dependencies
+# Note: This assumes the build context is the project root
+COPY requirements.txt .
+RUN pip install --upgrade pip && \
+    pip install -r requirements.txt
+
+# Copy source code
+COPY . .
+
+# Install MCPUniverse package
+RUN pip install -e .
+
+# Create workspace directory
+RUN mkdir -p /workspace && chmod 777 /workspace
+
+# Expose the default gateway port
+EXPOSE 8000
+
+# Default command to run the MCP gateway
+# The actual command will be overridden by DockerProvisioner.create()
+CMD ["python", "-m", "mcpuniverse.mcp.gateway", "--port", "8000", "--mode", "sse"]

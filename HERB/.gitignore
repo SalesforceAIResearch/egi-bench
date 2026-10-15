@@ -1,0 +1,6 @@
+# Generated retrieval artifacts
+code/index/
+code/output/
+
+# Local environment
+.venv/

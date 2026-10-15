@@ -1,0 +1,266 @@
+# EGI-Bench Unified Configuration
+# Mode-specific benchmark profiles plus the M1-M6 weights that produce
+# the headline EGI Score.
+
+# EGI Score = weighted mean of M1-M6 bucket scores. Edit these to retune
+# the headline metric for your use case (e.g. boost M5 for a safety-first
+# evaluation). Weights renormalize automatically over whichever M-buckets
+# have contributors -- they do not need to sum to 1.0. Per-invocation
+# overrides are also accepted via `--egi-weights` on the CLI; see
+# docs/scoring.md for the routing table.
+egi_weights:
+  M1: 0.28  # Task Outcome Accuracy
+  M2: 0.22  # Tool Actioning Reliability
+  M3: 0.16  # Planning & Workflow Orchestration
+  M4: 0.14  # Retrieval & Evidence Grounding
+  M5: 0.14  # Safety, Abstention & Policy Compliance
+  M6: 0.06  # Engineering & Maintainability Quality
+
+gateway:
+  # The local LiteLLM proxy (litellm_proxy/start_server.sh) listens here.
+  # Every benchmark routes its OpenAI-compatible LLM calls through this URL.
+  base_url: "http://localhost:8008/v1"
+  # /health/liveliness is LiteLLM's lightweight readiness probe. /health
+  # itself triggers an upstream model probe and is too heavy for startup
+  # checks.
+  health_endpoint: "http://localhost:8008/health/liveliness"
+
+# Cross-benchmark defaults. These are applied unless a specific benchmark
+# overrides them under `benchmarks.<name>.modes.<mode>.<key>`.
+defaults:
+  # Wall-clock cap (seconds) for each benchmark subprocess. Each benchmark
+  # stage runs as one or more child processes (e.g. one per environment or
+  # per category); this is the maximum time any single child can run before
+  # the orchestrator SIGKILLs it. Set generously so slow local environments
+  # (CPU-bound gateways, throttled APIs, large eval sweeps) do not get cut
+  # off mid-run -- benchmarks generally only write their final results JSON
+  # after the whole subprocess completes, so a SIGKILL means a 0/error.
+  subprocess_timeout_seconds:
+    quick: 14400    # 4h per subprocess
+    deep:  28800    # 8h per subprocess
+
+benchmarks:
+  crmarena:
+    dir: "CRMArena"
+    venv: "CRMArena/.venv"
+    modes:
+      quick:
+        tasks:
+          - policy_violation_identification
+          - named_entity_disambiguation
+          - knowledge_qa
+          - case_routing
+          - handle_time
+          - transfer_count
+          - top_issue_identification
+          - best_region_identification
+          - monthly_trend_analysis
+        max_tasks_per_category: 6
+        sample_seed: 42
+      deep:
+        tasks:
+          - policy_violation_identification
+          - named_entity_disambiguation
+          - best_region_identification
+          - handle_time
+          - knowledge_qa
+          - transfer_count
+          - case_routing
+          - top_issue_identification
+          - monthly_trend_analysis
+        max_tasks_per_category: 12
+        sample_seed: 42
+    default_args:
+      agent_strategy: "tool_call"
+      agent_eval_mode: "aided"
+      llm_provider: "openai"
+      org_type: "original"
+
+  herb:
+    dir: "HERB/code"
+    venv: "HERB/.venv"
+    modes:
+      quick:
+        modes:
+          - ans
+          - unans
+        max_questions: 80
+      deep:
+        modes:
+          - ans
+          - unans
+    default_args:
+      embedding_mode: "huggingface"
+      embedding_model_name: "BAAI/bge-small-en-v1.5"
+      max_workers: 5
+      num_attempts: 1
+      # HERB constructs its OpenAI LLM via llama-index's ``OpenAILike`` so it
+      # can route arbitrary gateway-served model names (e.g. ``gpt-5.5``)
+      # without being blocked by llama-index's hardcoded model registry.
+      #
+      # ``context_window`` is what llama-index uses for prompt-window
+      # accounting (chunk packing in CompactAndRefine, etc.). It must be
+      # <= the upstream model's real window; smaller is safe but slightly
+      # less efficient. Common values:
+      #   * gpt-5 / gpt-5.1 / gpt-5.2 base ............ 400000   (default)
+      #   * gpt-5.5 / gpt-4.1 (~1M tokens) ............ 1047576
+      #   * gpt-4o / gpt-5-chat-latest ................ 128000
+      #   * gpt-3.5-turbo ............................. 16384
+      context_window: 400000
+
+  personabench:
+    dir: "PersonaBench"
+    venv: "PersonaBench/.venv"
+    # PersonaBench v1 only ships private documents for 3 people per community
+    # (community_0, community_1), so num_people is capped at 3 and the community
+    # list is the full released set. We hold the retriever fixed at
+    # all-MiniLM-L6-v2 across both modes: score_personabench in run_all.py
+    # averages all (noise, retriever) accuracies into the headline score and
+    # collides per-retriever sub-score keys, so a retriever sweep blurs the
+    # LLM-quality signal rather than enriching it. Quick vs deep differs only
+    # along the noise axis, which is what actually moves the score.
+    modes:
+      quick:
+        args:
+          num_people: 3
+          test_community_ids: "community_0,community_1"
+          test_noises: "0.0,0.7"
+          retrievers: "all-MiniLM-L6-v2"
+          num_chunks: 5
+      deep:
+        args:
+          num_people: 3
+          test_community_ids: "community_0,community_1"
+          test_noises: "0.0,0.3,0.5,0.7"
+          retrievers: "all-MiniLM-L6-v2"
+          num_chunks: 5
+    default_args:
+      data_dir: "eval_data/eval_data_v1"
+      retrievers: "all-MiniLM-L6-v2"
+      test_community_ids: "community_0,community_1"
+      test_noises: "0.0,0.3,0.5,0.7"
+      num_people: 3
+      num_chunks: 5
+
+  userbench:
+    dir: "UserBench"
+    venv: "UserBench/.venv"
+    modes:
+      quick:
+        envs:
+          - travel22
+          - travel33
+          - travel44
+        max_tasks_per_env: 60
+      deep:
+        envs:
+          - "__all__"
+    default_args:
+      max_turns: 20
+      pass_k: 1
+      temperature: 1.0  # gpt-5-nano only supports temperature=1.0
+
+  mcpuniverse:
+    dir: "MCP-Universe"
+    venv: "MCP-Universe/.venv"
+    # Native MCP-Universe domains (not MCPMark). Each name is the YAML stem
+    # under MCP-Universe/mcpuniverse/benchmark/configs/mcpuniverse/<stem>.yaml.
+    # The runner patches the LLM to the LiteLLM proxy and forces agent.type=react so
+    # upstream's openrouter/harmony_react configs work through the proxy.
+    #
+    # Quick vs deep:
+    #   quick -> financial_analysis only. Uses yfinance + calculator — no
+    #            API keys, so a stock clone can smoke-test the suite.
+    #   deep  -> adds web_search (needs SERP_API_KEY) and location_navigation
+    #            (needs GOOGLE_MAPS_API_KEY). Missing keys => domain skipped
+    #            with a note, not a failure (see optional_domains below).
+    modes:
+      quick:
+        domains:
+          - financial_analysis
+        max_tasks_per_domain: 20
+        sample_seed: 42
+      deep:
+        domains:
+          - financial_analysis
+          - web_search
+          - location_navigation
+        # No max_tasks_per_domain => run every task in each domain's YAML.
+        sample_seed: 42
+    # Per-domain env-var gating. Missing vars => domain is skipped with a note
+    # rather than failing the whole run. Matches the pattern used by other
+    # benchmarks' optional_* tables.
+    optional_domains:
+      web_search: [SERP_API_KEY]
+      location_navigation: [GOOGLE_MAPS_API_KEY]
+      # Reserved for future expansion:
+      # repository_management: [GITHUB_PERSONAL_ACCESS_TOKEN, GITHUB_PERSONAL_ACCOUNT_NAME]
+      # multi_server: [SERP_API_KEY, NOTION_API_KEY, NOTION_ROOT_PAGE, GITHUB_PERSONAL_ACCESS_TOKEN, GITHUB_PERSONAL_ACCOUNT_NAME]
+      # 3d_design: [BLENDER_APP_PATH, MCPUniverse_DIR]
+
+  mcpeval:
+    dir: "MCPEval"
+    venv: "MCPEval/.venv"
+    # Quick mode uses only airbnb: a single domain that (a) needs no
+    # extra API keys, (b) exercises multi-step tool sequencing, and
+    # (c) stays within the 1-hour quick budget at ~40 min on gpt-4.1.
+    # Deep mode adds yfinance (no key) and national_parks (needs
+    # NPS_API_KEY). Missing NPS_API_KEY => national_parks is skipped
+    # with a note, mirroring the mcpuniverse optional_domains pattern.
+    modes:
+      quick:
+        domains:
+          - airbnb
+        num_tasks: 50
+        max_turns: 20
+      deep:
+        domains:
+          - airbnb
+          - yfinance
+          - national_parks
+        num_tasks: 50
+        max_turns: 30
+    # Per-domain env-var gating. Missing vars => domain is skipped with
+    # a note rather than failing the whole run. Same shape and semantics
+    # as benchmarks.mcpuniverse.optional_domains above.
+    optional_domains:
+      national_parks: [NPS_API_KEY]
+
+  benchforce:
+    dir: "Benchforce"
+    venv: "Benchforce/.venv"
+    modes:
+      quick:
+        environments:
+          - hospital
+        entries: 40
+      deep:
+        environments:
+          - hospital
+          - hr_software
+        entries: -1
+    default_args:
+      max_turns: 15
+
+  locobench:
+    dir: "LoCoBench"
+    venv: "LoCoBench/.venv"
+    default_args:
+      max_concurrent_scenarios: 2
+    modes:
+      quick:
+        difficulty: "easy"
+        task_categories: []
+        max_concurrent_scenarios: 1
+        num_scenarios: 30
+        # Inherits defaults.subprocess_timeout_seconds.quick (4h).
+      deep:
+        difficulty: null
+        task_categories: []
+        max_concurrent_scenarios: 3
+        num_scenarios: 300
+        # Override the 8h global default: deep runs 300 scenarios across all
+        # difficulties (incl. expert) on potentially-slow reasoning models, so
+        # give locobench a longer single-subprocess budget. _locobench_score_
+        # from_checkpoint is the partial-results fallback if even this is hit.
+        timeout_seconds: 43200    # 12h

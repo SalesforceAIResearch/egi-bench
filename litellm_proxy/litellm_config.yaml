@@ -1,0 +1,247 @@
+# EGI-Bench LiteLLM Proxy configuration.
+#
+# This file is the only place users normally edit. Each `model_list` entry
+# maps a friendly model name (what `egi-bench run --model X` resolves to)
+# to a concrete provider route. The proxy exposes everything below through
+# the standard OpenAI wire protocol on http://localhost:8008/v1, so every
+# benchmark adapter (HERB, MCP-Universe, MCPEval, ...) can keep using the
+# OpenAI Python SDK unchanged.
+#
+# See docs/llm-providers.md for "how to add a provider", per-provider
+# gotchas (Anthropic system-prompt translation, Bedrock SigV4,
+# reasoning-model `drop_params`), and the judge-pin rationale.
+
+model_list:
+  # ─── 1) Tested-model routes ───────────────────────────────────────────
+  # What `egi-bench run --model <model_name>` resolves to. Add or edit
+  # freely. Each entry must set `model_name` (the alias EGI-Bench requests)
+  # and `litellm_params.model` (the upstream identifier; the prefix before
+  # the slash selects the LiteLLM provider).
+
+  # OpenAI direct.
+  #
+  # GPT-5* and o-series reasoning models reject any non-default
+  # `temperature`/`top_p` (OpenAI returns 400 "Only the default (1) value
+  # is supported"). LiteLLM's global `drop_params: true` does NOT cover
+  # this case because OpenAI lists those params as supported -- just
+  # constrained -- so we explicitly drop them per-route. Keeps benchmark
+  # callers (UserBench, MCPEval, HERB, ...) free to keep passing
+  # `temperature=0` for non-reasoning models without per-model branching.
+  - model_name: gpt-5-nano
+    litellm_params:
+      model: openai/gpt-5-nano
+      api_key: os.environ/OPENAI_API_KEY
+      additional_drop_params: ["temperature", "top_p"]
+
+  - model_name: gpt-5-mini
+    litellm_params:
+      model: openai/gpt-5-mini
+      api_key: os.environ/OPENAI_API_KEY
+      additional_drop_params: ["temperature", "top_p"]
+
+  - model_name: gpt-5
+    litellm_params:
+      model: openai/gpt-5
+      api_key: os.environ/OPENAI_API_KEY
+      additional_drop_params: ["temperature", "top_p"]
+
+  - model_name: gpt-4.1-nano
+    litellm_params:
+      model: openai/gpt-4.1-nano
+      api_key: os.environ/OPENAI_API_KEY
+
+  # Anthropic direct
+  - model_name: claude-sonnet-4-5
+    litellm_params:
+      model: anthropic/claude-sonnet-4-5-20250929
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: claude-opus-4-5
+    litellm_params:
+      model: anthropic/claude-opus-4-5-20251101
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # Google Gemini direct
+  - model_name: gemini-2.5-pro
+    litellm_params:
+      model: gemini/gemini-2.5-pro
+      api_key: os.environ/GEMINI_API_KEY
+
+  - model_name: gemini-2.5-flash
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GEMINI_API_KEY
+
+  # Google Vertex AI. Auth uses Application Default Credentials
+  # (`gcloud auth application-default login`) or GOOGLE_APPLICATION_CREDENTIALS.
+  - model_name: vertex/gemini-2.5-pro
+    litellm_params:
+      model: vertex_ai/gemini-2.5-pro
+      vertex_project: os.environ/VERTEX_PROJECT
+      vertex_location: os.environ/VERTEX_LOCATION
+
+  - model_name: vertex/gemini-2.5-flash
+    litellm_params:
+      model: vertex_ai/gemini-2.5-flash
+      vertex_project: os.environ/VERTEX_PROJECT
+      vertex_location: os.environ/VERTEX_LOCATION
+
+  - model_name: vertex/gemini-2.0-flash
+    litellm_params:
+      model: vertex_ai/gemini-2.0-flash
+      vertex_project: os.environ/VERTEX_PROJECT
+      vertex_location: os.environ/VERTEX_LOCATION
+
+  # AWS Bedrock via LiteLLM (replaces the old standalone FastAPI shim).
+  # LiteLLM signs requests with SigV4 using the standard AWS env vars.
+  #
+  # `additional_drop_params: ["top_p"]` works around a Bedrock-specific
+  # policy: Bedrock's `invoke_model` for Anthropic Claude rejects requests
+  # that set BOTH `temperature` and `top_p`
+  # (`ValidationException: temperature and top_p cannot both be specified
+  # for this model. Please use only one.`). The native Anthropic API
+  # accepts both, but we standardise on dropping `top_p` here so callers
+  # that hardcode the OpenAI-typical `temperature=0.0, top_p=1.0` pair
+  # (CRMArena's tool_call_agent and chat_agent, MCPEval, ...) work
+  # unchanged. Every EGI-Bench benchmark ships `top_p=1.0` as a no-op
+  # default, so dropping it is observationally equivalent to the previous
+  # behaviour for non-Bedrock routes. If a future benchmark legitimately
+  # needs nucleus sampling, route it through the Anthropic-direct
+  # `claude-*` aliases (which don't drop `top_p`), or split this into
+  # conditional logic in a custom handler.
+  - model_name: bedrock/claude-3-7-sonnet
+    litellm_params:
+      model: bedrock/us.anthropic.claude-3-7-sonnet-20250219-v1:0
+      aws_region_name: os.environ/AWS_REGION
+      additional_drop_params: ["top_p"]
+
+  - model_name: bedrock/claude-3-5-sonnet
+    litellm_params:
+      model: bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0
+      aws_region_name: os.environ/AWS_REGION
+      additional_drop_params: ["top_p"]
+
+  - model_name: bedrock/claude-opus-4
+    litellm_params:
+      model: bedrock/us.anthropic.claude-opus-4-20250514-v1:0
+      aws_region_name: os.environ/AWS_REGION
+      additional_drop_params: ["top_p"]
+
+  - model_name: bedrock/claude-4-5-sonnet
+    litellm_params:
+      model: bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0
+      aws_region_name: os.environ/AWS_REGION
+      additional_drop_params: ["top_p"]
+
+  - model_name: bedrock/claude-4-6-opus
+    litellm_params:
+      model: bedrock/us.anthropic.claude-opus-4-6-v1
+      aws_region_name: os.environ/AWS_REGION
+      additional_drop_params: ["top_p"]
+
+  # ─── 2) Judge / simulator pins (DO NOT change per --model) ────────────
+  # HERB's gpt4-correctness judge, MCP-Universe sub-evaluators, and
+  # UserBench's TravelGym simulator request these model names directly
+  # (e.g. evaluate.py calls model="gpt-4"). Pinning them to a fixed
+  # upstream keeps EGI scores apple-to-apple across runs, regardless of
+  # which model is under test.
+  #
+  # All judge / simulator calls are routed through OpenAI direct so EGI
+  # scores remain comparable regardless of which tested-model route is
+  # under test. OPENAI_API_KEY is required even when the model under test
+  # is non-OpenAI.
+
+  - model_name: gpt-4
+    litellm_params:
+      model: openai/gpt-4
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: gpt-4-turbo
+    litellm_params:
+      model: openai/gpt-4-turbo
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+  # CRMArena Evaluator (`crm_sandbox/env/env.py`) defaults to user_model=
+  # "gpt-4o-2024-08-06" via litellm.completion(custom_llm_provider="openai").
+  # Pin the dated alias so the evaluator routes through the proxy with the
+  # rest of the judge stack instead of leaking to api.openai.com directly.
+  - model_name: gpt-4o-2024-08-06
+    litellm_params:
+      model: openai/gpt-4o-2024-08-06
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: gpt-4.1
+    litellm_params:
+      model: openai/gpt-4.1
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: gpt-4.1-mini
+    litellm_params:
+      model: openai/gpt-4.1-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: gpt-4.1-nano
+    litellm_params:
+      model: openai/gpt-4.1-nano
+      api_key: os.environ/OPENAI_API_KEY
+
+  # MCP-Universe `deepresearch.hle_llm_as_a_judge`
+  # (mcpuniverse/evaluator/deepresearch/functions.py) defaults to
+  # model="o3-mini-2025-01-31". The deepresearch domain is not in
+  # EGI-Bench's quick/deep modes today, but pin it defensively so the
+  # judge routes through the proxy if anyone enables that domain.
+  - model_name: o3-mini-2025-01-31
+    litellm_params:
+      model: openai/o3-mini-2025-01-31
+      api_key: os.environ/OPENAI_API_KEY
+      additional_drop_params: ["temperature", "top_p"]
+
+  # ─── 3) Embeddings (used by HERB / PersonaBench when not local) ───────
+  # Routed through OpenAI direct. HERB defaults to HuggingFace embeddings
+  # when invoked via EGI-Bench (see benchmark_config.yaml). These pins
+  # keep any direct embedding call on OpenAI if HERB is run standalone
+  # with --embedding_mode openai.
+  - model_name: text-embedding-3-large
+    litellm_params:
+      model: openai/text-embedding-3-large
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: text-embedding-3-small
+    litellm_params:
+      model: openai/text-embedding-3-small
+      api_key: os.environ/OPENAI_API_KEY
+
+litellm_settings:
+  # Strip provider-unsupported parameters (e.g. `reasoning_effort` for
+  # non-reasoning models, `max_tokens` for OpenAI reasoning models that
+  # only accept `max_completion_tokens`) instead of erroring. Replaces
+  # _translate_chat_body() from the previous bespoke proxy implementation.
+  #
+  # NOTE: `drop_params` only drops params the upstream marks as
+  # *unsupported*. GPT-5*/o-series reject non-default values of
+  # `temperature`/`top_p` ("Only the default (1) value is supported"),
+  # but those params are technically "supported" so this flag does not
+  # drop them. Per-route `additional_drop_params: ["temperature",
+  # "top_p"]` on each gpt-5*/o3-mini entry above does the value-level
+  # drop. Add the same to any future reasoning-model route.
+  drop_params: true
+
+  num_retries: 3
+  request_timeout: 600
+
+# No general_settings.master_key on purpose. The proxy is local-only on
+# port 8008 and authenticates upstream itself via the per-route
+# api_key / extra_headers above; setting a master_key here would force
+# every benchmark to send that key as a Bearer (or have a virtual-key
+# DB on the side), which adds friction with no security benefit.
+# Benchmarks continue to pass `Bearer dummy` and the proxy ignores it.

@@ -1,0 +1,11 @@
+# MCPEval runtime outputs
+results/
+
+# Generated model configs produced during runs/experiments
+benchmarks/*/eval_models/gen_*.json
+benchmarks/*/eval_models/unified_*.json
+
+# Local Python environment and caches
+.venv/
+__pycache__/
+*.py[cod]

@@ -1,0 +1,19 @@
+[project]
+name = "egi-bench"
+version = "0.1.0"
+description = "Unified CLI for running EGI-Bench benchmarks"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "PyYAML>=6.0",
+]
+
+[project.scripts]
+egi-bench = "egi_bench.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["egi_bench*"]

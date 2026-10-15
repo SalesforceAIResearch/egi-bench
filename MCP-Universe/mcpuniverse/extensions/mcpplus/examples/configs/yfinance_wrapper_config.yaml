@@ -1,0 +1,98 @@
+# Example: Benchmark with Separate LLM for Post-Processor
+#
+# - Main agent uses powerful LLM (e.g., GPT-5) for complex reasoning
+# - Post-processor uses cheaper LLM (e.g., GPT-5-mini) for simple filtering
+# - Cost optimization: expensive LLM only for agent tasks, cheap LLM for filtering
+
+# Main agent LLM - powerful model for complex tasks
+kind: llm
+spec:
+  name: main-llm
+  type: openai
+  config:
+    model_name: claude-sonnet-4-5
+
+---
+# Post-processor LLM - cheaper/faster model for filtering
+kind: llm
+spec:
+  name: postprocessor-llm
+  type: openai
+  config:
+    model_name: gpt-5-mini  # Cheaper model for simple code generation
+
+---
+# Wrapper configuration with separate LLM
+kind: wrapper
+spec:
+  name: yfinance-wrapper
+  enabled: true
+  token_threshold: 2000
+  post_process_llm:     # Use separate LLM config
+    llm: postprocessor-llm  # Reference to the cheaper LLM
+  skip_iteration_on_size_failure: false
+  max_iterations: 3
+  llm_timeout: 500
+
+---
+# Agent uses the main (expensive) LLM
+kind: agent
+spec:
+  name: fc-agent
+  type: function_call
+  config:
+    llm: main-llm          # Agent uses GPT-5
+    wrapper: yfinance-wrapper  # Wrapper uses GPT-5-mini via post_process_llm
+    instruction: You are an agent for financial analysis. If you need to calculate the result, you can use the calculator tool.
+    max_iterations: 15
+    summarize_tool_response: false
+    servers:
+      - name: yfinance
+      - name: calculator
+
+---
+kind: benchmark
+spec:
+  description: Test agent with separate LLM for post-processing (cost optimization)
+  agent: fc-agent
+  tasks:
+    - mcpuniverse/financial_analysis/yfinance_task_0001.json
+    - mcpuniverse/financial_analysis/yfinance_task_0002.json
+    - mcpuniverse/financial_analysis/yfinance_task_0003.json
+    - mcpuniverse/financial_analysis/yfinance_task_0004.json
+    - mcpuniverse/financial_analysis/yfinance_task_0005.json
+    - mcpuniverse/financial_analysis/yfinance_task_0006.json
+    - mcpuniverse/financial_analysis/yfinance_task_0007.json
+    - mcpuniverse/financial_analysis/yfinance_task_0008.json
+    - mcpuniverse/financial_analysis/yfinance_task_0009.json
+    - mcpuniverse/financial_analysis/yfinance_task_0010.json
+    - mcpuniverse/financial_analysis/yfinance_task_0011.json
+    - mcpuniverse/financial_analysis/yfinance_task_0012.json
+    - mcpuniverse/financial_analysis/yfinance_task_0013.json
+    - mcpuniverse/financial_analysis/yfinance_task_0014.json
+    - mcpuniverse/financial_analysis/yfinance_task_0015.json
+    - mcpuniverse/financial_analysis/yfinance_task_0016.json
+    - mcpuniverse/financial_analysis/yfinance_task_0017.json
+    - mcpuniverse/financial_analysis/yfinance_task_0018.json
+    - mcpuniverse/financial_analysis/yfinance_task_0019.json
+    - mcpuniverse/financial_analysis/yfinance_task_0020.json
+    - mcpuniverse/financial_analysis/yfinance_task_0021.json
+    - mcpuniverse/financial_analysis/yfinance_task_0022.json
+    - mcpuniverse/financial_analysis/yfinance_task_0023.json
+    - mcpuniverse/financial_analysis/yfinance_task_0024.json
+    - mcpuniverse/financial_analysis/yfinance_task_0025.json
+    - mcpuniverse/financial_analysis/yfinance_task_0026.json
+    - mcpuniverse/financial_analysis/yfinance_task_0027.json
+    - mcpuniverse/financial_analysis/yfinance_task_0028.json
+    - mcpuniverse/financial_analysis/yfinance_task_0029.json
+    - mcpuniverse/financial_analysis/yfinance_task_0030.json
+    - mcpuniverse/financial_analysis/yfinance_task_0031.json
+    - mcpuniverse/financial_analysis/yfinance_task_0032.json
+    - mcpuniverse/financial_analysis/yfinance_task_0033.json
+    - mcpuniverse/financial_analysis/yfinance_task_0034.json
+    - mcpuniverse/financial_analysis/yfinance_task_0035.json
+    - mcpuniverse/financial_analysis/yfinance_task_0036.json
+    - mcpuniverse/financial_analysis/yfinance_task_0037.json
+    - mcpuniverse/financial_analysis/yfinance_task_0038.json
+    - mcpuniverse/financial_analysis/yfinance_task_0039.json
+    - mcpuniverse/financial_analysis/yfinance_task_0040.json

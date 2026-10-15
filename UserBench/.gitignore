@@ -1,0 +1,25 @@
+# Runtime outputs
+outputs/
+reports/
+logs/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Local environment and temp files
+.env
+.env.*
+*.log
+*.tmp
+*.temp
+.DS_Store

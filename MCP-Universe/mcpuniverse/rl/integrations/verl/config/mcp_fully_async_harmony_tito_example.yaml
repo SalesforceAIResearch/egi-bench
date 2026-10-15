@@ -1,0 +1,260 @@
+# MCP Fully Async Training - Harmony Agent + TITO (Token In Token Out)
+#
+# This is an example config. Copy and modify for your own setup.
+#
+# Harmony Agent:
+#   - HarmonyReAct agent mode
+#   - Uses gpt_oss formatter
+#
+# TITO mode: uses token IDs directly, avoids redundant tokenization
+# Fully Async mode: decouples Rollouter and Trainer via MessageQueue for
+#   parallel execution. Rollouter continuously generates MCP agent trajectories
+#   via MCPLoopManager and pushes samples to a queue. Trainer pulls from queue
+#   and runs PPO updates. ParameterSynchronizer broadcasts updated weights from
+#   Trainer to Rollouter.
+#
+# Architecture:
+#   MCPFullyAsyncRollouter (Rollout GPUs) --[MessageQueue]--> MCPFullyAsyncTrainer (Training GPUs)
+#                      ^                                                |
+#                      |_________ ParameterSynchronizer (NCCL) ________|
+#
+# Key settings:
+#   - mcp_agent.agent_mode: harmony
+#   - mcp_agent.formatter_type: gpt_oss
+#   - mcp_agent.rollout_mode: token (enables TITO)
+#   - actor_rollout_ref.hybrid_engine: false (required for fully async)
+#
+# Usage:
+#   python -m mcpuniverse.rl.integrations.verl.fully_async.mcp_async_main \
+#       --config-path=config \
+#       --config-name=mcp_fully_async_harmony_tito_example \
+#       actor_rollout_ref.model.path=/path/to/your/model \
+#       data.train_files=/path/to/train.json \
+#       data.val_files=/path/to/val.json \
+#       trainer.n_gpus_per_node=4 \
+#       rollout.n_gpus_per_node=4
+
+hydra:
+  searchpath:
+    - file://${oc.env:VERL_CONFIG_PATH,/path/to/verl/verl/trainer/config}
+
+defaults:
+  - ppo_trainer
+  - _self_
+
+# ============================================================================
+# Ray Configuration
+# ============================================================================
+ray_init:
+  num_cpus: 144
+  timeline_json_file: null
+
+# ============================================================================
+# Async Training Configuration
+# ============================================================================
+async_training:
+  # Staleness threshold: max ratio of stale samples allowed before
+  # backpressure pauses the rollouter.
+  staleness_threshold: 1
+  # Number of training steps between parameter syncs.
+  # 1 = sync every step (freshest data, good when trainer is bottleneck).
+  trigger_parameter_sync_step: 1
+  # Number of mini-batches to collect per training step
+  require_batches: 1
+  # Optional: override estimated total_train_steps (for tqdm only, not a stop condition).
+  # null = auto-derive from dataset size. Training stops by queue closure, not step count.
+  total_train_steps: null
+  # Enable partial rollout (cancel in-flight on pause)
+  partial_rollout: true
+  # Rollouter handles validation (has vLLM inference engine)
+  use_trainer_do_validate: false
+  # Run validation concurrently with rollout
+  parallel_validate_and_rollout: false
+  # Checkpoint engine config
+  checkpoint_engine:
+    enable: false
+
+# ============================================================================
+# MCP Agent Configuration - Harmony Agent + TITO Mode
+# ============================================================================
+mcp_agent:
+  # Agent mode: harmony (HarmonyReAct agent)
+  agent_mode: harmony
+
+  # Formatter: gpt_oss (GPT-OSS Harmony format)
+  formatter_type: gpt_oss
+
+  # Rollout mode:
+  #   "token" = TITO (token in -> token out, avoids redundant tokenization)
+  #   "text"  = standard (text in -> text out, via HTTP API)
+  rollout_mode: token
+
+  # MCP transport: "stdio", "sse", or "docker_pool"
+  #   stdio       - spawns a separate MCP server process per trajectory
+  #   sse         - uses a shared MCP Gateway (must be started manually)
+  #   docker_pool - uses a Docker container pool (isolated env per trajectory)
+  mcp_transport: "stdio"
+  mcp_gateway_address: ""  # only used for sse transport
+
+  # Trajectory trace logging: set a directory to enable JSONL trace logs (null = disabled)
+  trace_log_dir: null
+
+  # Docker Env Pool config (only used when mcp_transport == "docker_pool")
+  env_pool:
+    enabled: false
+    docker_host: null   # set via CPU_POD_DOCKER_HOST env var
+    host: null          # set via CPU_POD_HOST env var
+    base_port: 9000
+    max_pool_size: 25
+    startup_timeout: 180.0
+    dockerfile_path: ""
+    build_context: ""
+    auto_build: true
+    reuse_existing: true
+    reset_on_release: false
+    cpu_limit: "2"
+    memory_limit: "4g"
+    gateway_mode: "sse"
+    # Docker network mode: "bridge" (default, uses port mapping) or "host"
+    # Use "host" on Container-Optimized OS where iptables port mapping may not work
+    network: "bridge"
+
+  # LLM config (in TITO mode this only sets sampling params; actual generation uses the vLLM engine)
+  llm_type: vllm_local
+  llm_config:
+    model_name: ${actor_rollout_ref.model.path}
+    temperature: 0.7
+    top_p: 0.95
+    max_completion_tokens: 8192
+    reasoning: low  # HarmonyReAct requires a reasoning parameter
+
+  # Validation LLM config (optional; falls back to llm_config if not specified)
+  val_llm_config:
+    temperature: 0.0  # deterministic for validation
+
+  # Agent config (HarmonyReActConfig parameters)
+  agent_config:
+    system_prompt: null
+    context_examples: ""
+    max_iterations: 10
+    summarize_tool_response: false
+
+  # Trajectories per prompt
+  num_trajectories: 1
+  val_num_trajectories: 1
+
+  # Max iterations per trajectory
+  max_iterations: 12
+
+  # Parallel agents
+  max_parallel_agents: 16
+
+  # MCP servers (typically read from task data JSON)
+  mcp_servers: []
+  use_sample_servers: true
+
+# ============================================================================
+# Data Configuration
+# ============================================================================
+data:
+  # Override these on the command line:
+  #   data.train_files=/path/to/train.json
+  #   data.val_files=/path/to/val.json
+  train_files: null
+  val_files: null
+  shuffle: true
+  seed: 42
+  truncation: error
+  prompt_key: instruction
+  reward_fn_key: data_source
+  trust_remote_code: true
+  return_raw_chat: true
+  train_batch_size: 1  # Not used by rollouter (uses gen_batch_size); kept for base config compat
+  # Rollout batch size: instances per generate_sequences() call.
+  # null = auto: ceil(max_parallel_agents / rollout.n), the smallest batch
+  # that fully utilises the dispatcher.  Smaller batches = faster per-batch,
+  # shorter pause waits, finer queue granularity for async pipelining.
+  gen_batch_size: null
+  train_max_samples: -1
+  val_max_samples: -1
+  return_raw_input_ids: false
+  filter_overlong_prompts: true
+
+# ============================================================================
+# Actor/Rollout Configuration — Separate GPUs (required for async) + TITO
+# ============================================================================
+actor_rollout_ref:
+  hybrid_engine: false  # Must be false for fully async
+
+  rollout:
+    mode: async          # async mode for better throughput
+    name: vllm           # inference backend: "vllm" or "sglang"
+    free_cache_engine: false
+    n: 2                 # GRPO: number of samples per prompt
+    max_model_len: 32768
+    calculate_log_probs: true  # Required for async: rollouter computes log probs
+    # Validation settings
+    val_kwargs:
+      do_sample: false
+      temperature: 0.0
+
+  model:
+    enable_gradient_checkpointing: true
+    path: null  # Set to your model path, or pass via command line
+
+  actor:
+    use_kl_loss: false
+    entropy_coeff: 0.001
+    strategy: fsdp2
+    use_rollout_log_probs: true  # Use log probs from rollouter (skip recompute)
+
+# ============================================================================
+# Algorithm Configuration - GRPO
+# ============================================================================
+algorithm:
+  adv_estimator: grpo
+  use_kl_in_reward: false
+  gamma: 1.0
+  lam: 1.0
+
+# ============================================================================
+# Reward Model (disabled, using MCP-Universe evaluators instead)
+# Note: reward.reward_model.enable is inherited from ppo_trainer base config
+# and defaults to false. No override needed here.
+# ============================================================================
+
+# ============================================================================
+# Critic (disabled for GRPO)
+# Note: critic.enable is inherited from ppo_trainer base config.
+# ============================================================================
+
+# ============================================================================
+# Trainer Configuration
+# ============================================================================
+trainer:
+  critic_warmup: 0
+  logger: ["console", "wandb"]
+  project_name: mcp_agent_training
+  experiment_name: harmony_tito_fully_async
+  val_before_train: true
+  total_epochs: 10
+  save_freq: 5
+  device: cuda
+  balance_batch: false
+  default_local_dir: checkpoints/mcp_async
+  default_hdfs_dir: null
+  resume_mode: auto
+  del_local_ckpt_after_load: false
+  esi_redundant_time: 0
+  n_gpus_per_node: 4
+  nnodes: 1
+
+# ============================================================================
+# Rollout Resource Configuration
+# ============================================================================
+rollout:
+  n_gpus_per_node: 4
+  nnodes: 1
+  test_freq: 1
+  total_epochs: 1000000
+  total_rollout_steps: null
